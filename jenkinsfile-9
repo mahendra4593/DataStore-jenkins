@@ -6,7 +6,7 @@ pipeline {
   }
 
   environment {
-     DOCKERHUB_CREDENTIALS=credentials("dockercred")
+     DOCKERHUB_CREDENTIALS=credentials("dockerhub-id")
   }
 
   stages {
@@ -40,7 +40,7 @@ pipeline {
       steps {
         sh """
           echo "-------- Pushing Artifacts To S3 --------"
-          aws s3 cp ./target/*.jar s3://mahi452218/
+          aws s3 cp ./target/*.jar s3://jenkins-452218/
           echo "-------- Pushing Artifacts To S3 Completed --------"
         """
       }
