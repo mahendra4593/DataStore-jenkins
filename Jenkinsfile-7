@@ -2,29 +2,31 @@ pipeline {
   agent any
 
   parameters {
-    string(name: "App_Version", description: "provide application version")
+    string(name: "App_Version" , description: "provide application version")
   }
 
   environment {
-    DOCKERHUB_CREDENTIALS=credentials("dockerhub")
+     DOCKERHUB_CREDENTIALS=credentials("docker-id")
   }
 
   stages {
-    stage("Checkout") {
+    stage("Repo Clone") {
       steps {
-        checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/shivagande26/DataStore.git']])
+        checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/mahendra4593/DataStore-jenkins.git']])
       }
     }
+
     stage("Maven Build") {
       steps {
         sh """
-          echo "-------- Building Application --------"
-          mvn clean package
-          echo "------- Application Built Successfully --------"
+            echo "-------- Building Application --------"
+            mvn clean package
+            echo "------- Application Built Successfully --------"
         """
       }
     }
-    stage("Execute Testcases") {
+
+    stage("Maven Test") {
       steps {
         sh """
           echo "-------- Executing Testcases --------"
@@ -33,16 +35,18 @@ pipeline {
         """
       }
     }
-    stage("Pushing Artifacts To S3") {
+
+    stage("Artifact Store") {
       steps {
         sh """
           echo "-------- Pushing Artifacts To S3 --------"
-          aws s3 cp ./target/*.jar s3://datastore-artefact-store-apps/
+          aws s3 cp ./target/*.jar s3://jenkins-45221817/
           echo "-------- Pushing Artifacts To S3 Completed --------"
         """
       }
     }
-    stage("Creating Docker Image") {
+
+    stage("Docker Image Build") {
       steps {
         sh """
           echo "-------- Building Docker Image --------"
@@ -51,7 +55,8 @@ pipeline {
         """
       }
     }
-    stage("Scaning Docker Image") {
+
+    stage("Docker Image Scan") {
       steps {
         sh """
           echo "-------- Scanning Docker Image --------"
@@ -60,16 +65,18 @@ pipeline {
         """
       }
     }
-    stage("Tagging Docker Image") {
+
+    stage("Docker Image Tag") {
       steps{
         sh """
           echo "-------- Tagging Docker Image --------"
-          docker tag datastore:"${App_Version}" 8072388539/datastore:"${App_Version}"
+          docker tag datastore:"${App_Version}" $DOCKERHUB_CREDENTIALS_USR/datastore:"${App_Version}"
           echo "-------- Tagging Docker Image Completed."
         """
       }
     }
-    stage("Loggingin & Pushing Docker image To DockerHub") {
+
+    stage("Loggingin & Pushing Docker image") {
       steps {
         sh """
           echo "-------- Logging To DockerHub --------"
@@ -77,11 +84,12 @@ pipeline {
           echo "-------- DockerHub Login Successful --------"
 
           echo "-------- Pushing Docker Image To DockerHub --------"
-          docker push 8072388539/datastore:"${App_Version}"
+          docker push $DOCKERHUB_CREDENTIALS_USR/datastore:"${App_Version}"
           echo "-------- Docker Image Pushed Successfully --------"
         """
       }
     }
+
     stage("cleanup") {
       steps {
         sh """
@@ -91,15 +99,52 @@ pipeline {
         """
       }
     }
+
     stage("Deployment Acceptance") {
       steps {
         input 'Trigger Down Stream Job'
       }
     }
+
     stage("Triggering Deployment Job") {
       steps {
-        build job: "KubernetesDeployment", parameters: [string(name: "App_Name", value: "datastore-deploy"), string(name: "App_Version", value: "${params.App_Version}")]
+        build job: "job-1", parameters: [
+          string(name: "App_Name", value: "datastore-deploy"),
+          string(name: "App_Version", value: "${params.App_Version}")
+        ]
       }
+    }
+  }
+
+  post {
+    success {
+      slackSend channel: '#practice-channel',
+                color: 'good',
+                message: "✔️ SUCCESS: `${env.JOB_NAME} #${env.BUILD_NUMBER}` completed successfully."
+    }
+
+    failure {
+      slackSend channel: '#practice-channel',
+                color: 'danger',
+                message: "❌ FAILURE: `${env.JOB_NAME} #${env.BUILD_NUMBER}` failed.\nCheck console output: ${env.BUILD_URL}"
+    }
+
+    unstable {
+      slackSend channel: '#practice-channel',
+                color: 'warning',
+                message: "⚠️ UNSTABLE: `${env.JOB_NAME} #${env.BUILD_NUMBER}` returned unstable status."
+    }
+
+    aborted {
+      slackSend channel: '#practice-channel',
+                color: '#808080',
+                message: "⛔ ABORTED: `${env.JOB_NAME} #${env.BUILD_NUMBER}` was aborted."
+    }
+
+    always {
+      slackSend channel: '#practice-channel',
+                color: '#439FE0',
+                message: "ℹ️ Build finished: `${env.JOB_NAME} #${env.BUILD_NUMBER}`"
     }
   }
 }
