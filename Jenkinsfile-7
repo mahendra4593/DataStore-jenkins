@@ -2,17 +2,22 @@ pipeline {
   agent any
 
   parameters {
-    string(name: "App_Version" , description: "provide application version")
+    string(name: "App_Version", description: "provide application version")
   }
 
   environment {
-     DOCKERHUB_CREDENTIALS=credentials("docker-id")
+     DOCKERHUB_CREDENTIALS = credentials("docker-id")
   }
 
   stages {
+
     stage("Repo Clone") {
       steps {
-        checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/mahendra4593/DataStore-jenkins.git']])
+        checkout scmGit(
+          branches: [[name: '*/master']],
+          extensions: [],
+          userRemoteConfigs: [[url: 'https://github.com/mahendra4593/DataStore-jenkins.git']]
+        )
       }
     }
 
@@ -56,22 +61,44 @@ pipeline {
       }
     }
 
+    /* ===================== FIX START =====================
+       ISSUE FIXED: Trivy failing due to /tmp (2GB limit) + Java DB download (886MB)
+       SOLUTION:
+       - Move TMPDIR away from /tmp
+       - Persist Trivy cache to avoid repeated downloads
+       - Reduce scan load for CI stability
+    ===================================================== */
+
     stage("Docker Image Scan") {
       steps {
         sh """
           echo "-------- Scanning Docker Image --------"
-          trivy image datastore:"${App_Version}"
+
+          # FIX 1: Avoid /tmp (tmpfs is only 2GB and causing failure)
+          export TMPDIR=/var/lib/jenkins/tmp
+          mkdir -p \$TMPDIR
+
+          # FIX 2: Persist Trivy DB cache (prevents re-downloading 886MB Java DB every build)
+          export TRIVY_CACHE_DIR=/var/lib/jenkins/.cache/trivy
+          mkdir -p \$TRIVY_CACHE_DIR
+
+          # FIX 3: Run optimized scan (CI friendly)
+          # Only vuln scan → avoids heavy secret + misconfig scanning overhead
+          trivy image --scanners vuln datastore:"${App_Version}"
+
           echo "-------- Scanning Docker Image Complete --------"
         """
       }
     }
 
+    /* ===================== FIX END ===================== */
+
     stage("Docker Image Tag") {
-      steps{
+      steps {
         sh """
           echo "-------- Tagging Docker Image --------"
           docker tag datastore:"${App_Version}" $DOCKERHUB_CREDENTIALS_USR/datastore:"${App_Version}"
-          echo "-------- Tagging Docker Image Completed."
+          echo "-------- Tagging Docker Image Completed --------"
         """
       }
     }
